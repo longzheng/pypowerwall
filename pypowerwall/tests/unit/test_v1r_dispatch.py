@@ -43,9 +43,10 @@ def core_for(transport):
 
 
 @pytest.mark.parametrize('watts', [-500, 500, 5000, 0, 12.5])
-def test_dispatch_wire_format(watts):
+@pytest.mark.parametrize('return_errors', [False, True])
+def test_dispatch_wire_format(watts, return_errors):
     transport = transport_for()
-    assert transport.dispatch_battery_power('TEST_DIN', watts, 30) == {
+    assert transport.dispatch_battery_power('TEST_DIN', watts, 30, return_errors=return_errors) == {
         'power_watts': watts, 'duration_seconds': 30,
     }
     payload, din = transport.post_v1r.call_args.args
@@ -101,9 +102,12 @@ def test_dispatch_probe_false_does_not_fall_back_to_lan():
     core.wifi_v1r_transport.post_v1r.assert_not_called()
 
 
-def test_resume_wire_format():
+@pytest.mark.parametrize('return_errors', [False, True])
+def test_resume_wire_format(return_errors):
     transport = transport_for()
-    assert transport.resume_battery_operation('TEST_DIN') == {'resume_battery_operation': True}
+    assert transport.resume_battery_operation('TEST_DIN', return_errors=return_errors) == {
+        'resume_battery_operation': True,
+    }
     payload, _ = transport.post_v1r.call_args.args
     assert payload.hex() == '0802120220011a0a0a08544553545f44494e2a05aa02020a00'
     request = pb.MessageEnvelope.FromString(payload).teg.dispatch_battery_power_request
@@ -168,17 +172,22 @@ def test_missing_din_and_transport_errors_do_not_report_success():
     assert transport.resume_battery_operation('TEST_DIN') is None
 
 
-def test_facade_backend_and_core_route_to_v1r_and_invalidate_samples():
+@pytest.mark.parametrize('return_errors', [False, True])
+def test_facade_backend_and_core_route_to_v1r_and_invalidate_samples(return_errors):
     transport = transport_for()
     core = core_for(transport)
     backend = PyPowerwallTEDAPI.__new__(PyPowerwallTEDAPI)
     backend.tedapi = core
     facade = Powerwall.__new__(Powerwall)
     facade.client = backend
-    assert facade.dispatch_battery_power(-500, 30) == {'power_watts': -500, 'duration_seconds': 30}
+    assert facade.dispatch_battery_power(-500, 30, return_errors=return_errors) == {
+        'power_watts': -500, 'duration_seconds': 30,
+    }
     assert core.pwcache == {'config': {'keep': True}}
     assert core.pwcachetime == {'config': 123}
-    assert facade.resume_battery_operation() == {'resume_battery_operation': True}
+    assert facade.resume_battery_operation(return_errors=return_errors) == {
+        'resume_battery_operation': True,
+    }
     assert transport.post_v1r.call_count == 2
 
 
@@ -189,22 +198,104 @@ def test_failed_command_preserves_cache():
 
 
 @pytest.mark.parametrize('v1r,connected', [(False, True), (True, False)])
-def test_unsupported_or_disconnected_core(v1r, connected):
+@pytest.mark.parametrize('return_errors', [False, True])
+def test_unsupported_or_disconnected_core(v1r, connected, return_errors):
     transport = transport_for()
     core = core_for(transport)
     core.v1r = v1r
     core.din = 'TEST_DIN' if connected else None
-    assert core.dispatch_battery_power(-500, 30) is None
-    assert core.resume_battery_operation() is None
+    assert core.dispatch_battery_power(-500, 30, return_errors=return_errors) is None
+    assert core.resume_battery_operation(return_errors=return_errors) is None
     transport.post_v1r.assert_not_called()
 
 
 @pytest.mark.parametrize('client', [None, object()])
-def test_unsupported_or_absent_facade_client(client):
+@pytest.mark.parametrize('return_errors', [False, True])
+def test_unsupported_or_absent_facade_client(client, return_errors):
     facade = Powerwall.__new__(Powerwall)
     facade.client = client
-    assert facade.dispatch_battery_power(500, 30) is None
-    assert facade.resume_battery_operation() is None
+    assert facade.dispatch_battery_power(500, 30, return_errors=return_errors) is None
+    assert facade.resume_battery_operation(return_errors=return_errors) is None
+
+
+@pytest.mark.parametrize('resume', [False, True])
+@pytest.mark.parametrize('return_errors', [False, True])
+@pytest.mark.parametrize('wifi', [False, True])
+@pytest.mark.parametrize('code,message', [
+    (11, 'power 15000.000000 exceeds discharge limit 10000'),
+    (12, 'not implemented'),
+    (7, 'permission denied'),
+    (0, ''),
+])
+def test_rejection_details_reach_facade_without_clearing_cache(
+        resume, return_errors, wifi, code, message, *, caplog):
+    reply = pb.MessageEnvelope()
+    reply.common.error_response.status.code = code
+    reply.common.error_response.status.message = message
+    transport = transport_for(reply.SerializeToString())
+    lan = transport_for() if wifi else transport
+    core = core_for(lan)
+    if wifi:
+        core.wifi_v1r_fallback = True
+        core.wifi_v1r_transport = transport
+        core.lan_failed = True
+        core._wifi_v1r_ready_until = time.monotonic() + 60.0
+    backend = PyPowerwallTEDAPI.__new__(PyPowerwallTEDAPI)
+    backend.tedapi = core
+    facade = Powerwall.__new__(Powerwall)
+    facade.client = backend
+    cache, timestamps = dict(core.pwcache), dict(core.pwcachetime)
+
+    if resume:
+        result = facade.resume_battery_operation(return_errors=return_errors)
+    else:
+        result = facade.dispatch_battery_power(15000, 30, return_errors=return_errors)
+    assert result == ({'error': message, 'code': code} if return_errors else None)
+    assert core.pwcache == cache
+    assert core.pwcachetime == timestamps
+    assert transport.post_v1r.call_count == 1
+    assert f'{message} (status code {code}' in caplog.text
+    if wifi:
+        lan.post_v1r.assert_not_called()
+
+    # Rejection details belong to this response, not shared connection state.
+    transport.post_v1r.return_value = ACK
+    assert facade.resume_battery_operation(return_errors=return_errors) == {
+        'resume_battery_operation': True,
+    }
+    assert core.pwcache == {'config': {'keep': True}}
+    assert core.pwcachetime == {'config': 123}
+
+
+@pytest.mark.parametrize('resume', [False, True])
+@pytest.mark.parametrize('reply', [None, b'', b'bad protobuf', b'\x2a\x00', bytes.fromhex('2a022200')])
+def test_error_option_keeps_unknown_outcomes_as_none(resume, reply):
+    transport = transport_for(reply)
+    core = core_for(transport)
+    backend = PyPowerwallTEDAPI.__new__(PyPowerwallTEDAPI)
+    backend.tedapi = core
+    facade = Powerwall.__new__(Powerwall)
+    facade.client = backend
+    if resume:
+        result = facade.resume_battery_operation(return_errors=True)
+    else:
+        result = facade.dispatch_battery_power(500, 30, return_errors=True)
+    assert result is None
+    assert {'status', 'controller', 'pw3_vitals'} <= set(core.pwcache)
+    assert transport.post_v1r.call_count == 1
+
+
+@pytest.mark.parametrize('watts,seconds', [(float('nan'), 30), (500, 0), (True, 30)])
+def test_error_option_does_not_swallow_invalid_arguments(watts, seconds):
+    transport = transport_for()
+    core = core_for(transport)
+    backend = PyPowerwallTEDAPI.__new__(PyPowerwallTEDAPI)
+    backend.tedapi = core
+    facade = Powerwall.__new__(Powerwall)
+    facade.client = backend
+    with pytest.raises(ValueError):
+        facade.dispatch_battery_power(watts, seconds, return_errors=True)
+    transport.post_v1r.assert_not_called()
 
 
 def test_schema_field_contract():

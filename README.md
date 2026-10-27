@@ -410,6 +410,12 @@ Use short durations (for example 30 seconds) and renew as needed. The reply
 acknowledges acceptance; check `pw.power()` to observe actual battery power.
 Gateway limits and firmware support still apply.
 
+Both methods accept `return_errors=True` to return gateway rejection details,
+for example `{"error": "power 15000.000000 exceeds discharge limit 10000", "code": 11}`.
+Check for `"error"` before treating a returned dictionary as an acknowledgement.
+By default all failures return `None`; with the option enabled, transport
+failures and missing acknowledgements still return `None`. See [API.md](API.md#timed-battery-dispatch-v1r-mode-only).
+
 > **A dispatch overrides the backup reserve and the grid export setting.** On a
 > Powerwall 2 (Backup Gateway 1, firmware 26.34.0), a discharge with the
 > reserve at 100% and export set to `pv_only` or `never` still discharged, sent

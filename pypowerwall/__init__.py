@@ -1308,7 +1308,8 @@ class Powerwall(object):
         log.error("reconnect_grid is not supported by %s backend", type(self.client).__name__)
         return None
 
-    def dispatch_battery_power(self, power_watts: float, duration_seconds: int) -> Optional[dict]:
+    def dispatch_battery_power(self, power_watts: float, duration_seconds: int,
+                               return_errors: bool = False) -> Optional[dict]:
         """Set battery power for 1-86400 seconds using a paired v1r RSA key.
 
         Positive watts discharge; negative watts charge; zero requests zero
@@ -1317,7 +1318,9 @@ class Powerwall(object):
         resume_battery_operation(). Use short durations and renew as needed.
 
         Returns the requested power and duration only after an acknowledgement,
-        or None on failure/unsupported backend. An acknowledgement is not
+        or None on failure/unsupported backend. With return_errors=True, a
+        gateway rejection returns {"error": message, "code": status_code};
+        transport failures still return None. An acknowledgement is not
         measured power: check power() to observe the result. Support depends
         on firmware; the gateway applies its own operating limits. This does
         not change config.json, backup reserve, tariff or manual backup events.
@@ -1329,20 +1332,23 @@ class Powerwall(object):
         if self._no_client():
             return None
         if hasattr(self.client, 'dispatch_battery_power'):
-            return self.client.dispatch_battery_power(power_watts, duration_seconds)
+            return self.client.dispatch_battery_power(
+                power_watts, duration_seconds, return_errors=return_errors)
         log.error('dispatch_battery_power requires v1r transport')
         return None
 
-    def resume_battery_operation(self) -> Optional[dict]:
+    def resume_battery_operation(self, return_errors: bool = False) -> Optional[dict]:
         """Release a v1r dispatch early; return an acknowledgement dict or None.
 
         Resumes the configured operating mode. This also succeeds when no
         dispatch is active, and does not cancel a manual backup event.
+        With return_errors=True, a gateway rejection returns an error/code
+        dictionary, as in dispatch_battery_power(); other failures return None.
         """
         if self._no_client():
             return None
         if hasattr(self.client, 'resume_battery_operation'):
-            return self.client.resume_battery_operation()
+            return self.client.resume_battery_operation(return_errors=return_errors)
         log.error('resume_battery_operation requires v1r transport')
         return None
 

@@ -927,17 +927,19 @@ class TEDAPI:
             self._v1r_write_transport(), "send_island_mode", self.din, mode=1
         )
 
-    def dispatch_battery_power(self, power_watts: float, duration_seconds: int) -> Optional[dict]:
+    def dispatch_battery_power(self, power_watts: float, duration_seconds: int,
+                               return_errors: bool = False) -> Optional[dict]:
         """Request a timed battery power setpoint through signed v1r."""
         from pypowerwall.helpers import validate_battery_dispatch
         validate_battery_dispatch(power_watts, duration_seconds)
-        return self._battery_dispatch_command('dispatch_battery_power', power_watts, duration_seconds)
+        return self._battery_dispatch_command(
+            'dispatch_battery_power', power_watts, duration_seconds, return_errors=return_errors)
 
-    def resume_battery_operation(self) -> Optional[dict]:
+    def resume_battery_operation(self, return_errors: bool = False) -> Optional[dict]:
         """Release an active dispatch through signed v1r."""
-        return self._battery_dispatch_command('resume_battery_operation')
+        return self._battery_dispatch_command('resume_battery_operation', return_errors=return_errors)
 
-    def _battery_dispatch_command(self, method: str, *args) -> Optional[dict]:
+    def _battery_dispatch_command(self, method: str, *args, return_errors: bool = False) -> Optional[dict]:
         """Dispatch through the same strict signed-v1r route as other writes."""
         if not self.v1r:
             log.error('%s requires v1r transport', method)
@@ -950,8 +952,8 @@ class TEDAPI:
             if transport is None:
                 log.error('%s requires an available signed-v1r transport', method)
                 return None
-            result = self._v1r_call(transport, method, self.din, *args)
-            if result is not None:
+            result = self._v1r_call(transport, method, self.din, *args, return_errors=return_errors)
+            if isinstance(result, dict) and 'error' not in result:
                 # Status/controller (and PW3 vitals, used by vitals() and
                 # get_blocks()) contain battery power. Drop their samples so
                 # the next read can observe the accepted setpoint/release.

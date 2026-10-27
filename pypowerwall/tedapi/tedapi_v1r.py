@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 import warnings
-from typing import Optional
+from typing import Optional, Union
 
 import requests
 import urllib3
@@ -598,31 +598,35 @@ class TEDAPIv1r:
         return {"mode": mode, "force": force, "result": result}
 
     def dispatch_battery_power(self, din: str, power_watts: float,
-                               duration_seconds: int) -> Optional[dict]:
+                               duration_seconds: int, return_errors: bool = False) -> Optional[dict]:
         """Send a timed setpoint: positive watts discharge, negative charge."""
         validate_battery_dispatch(power_watts, duration_seconds)
         teg = combined_pb2.TEGMessages()
         command = teg.dispatch_battery_power_request.real_power
         command.power_watts = float(power_watts)
         command.duration_seconds = duration_seconds
-        if self._send_battery_dispatch(din, teg):
+        result = self._send_battery_dispatch(din, teg)
+        if result is True:
             return {'power_watts': float(power_watts), 'duration_seconds': duration_seconds}
-        return None
+        return result if return_errors and isinstance(result, dict) else None
 
-    def resume_battery_operation(self, din: str) -> Optional[dict]:
+    def resume_battery_operation(self, din: str, return_errors: bool = False) -> Optional[dict]:
         """Release a timed dispatch and resume the configured operating mode."""
         teg = combined_pb2.TEGMessages()
         teg.dispatch_battery_power_request.resume_device_mode.SetInParent()
-        if self._send_battery_dispatch(din, teg):
+        result = self._send_battery_dispatch(din, teg)
+        if result is True:
             return {'resume_battery_operation': True}
-        return None
+        return result if return_errors and isinstance(result, dict) else None
 
-    def _send_battery_dispatch(self, din: str, teg_message) -> bool:
+    def _send_battery_dispatch(self, din: str, teg_message) -> Union[bool, dict]:
         """Require the dispatch acknowledgement, including for a resume.
 
         An ack confirms acceptance, not measured battery power. Firmware
         without the command may return common.error_response, code 12.
-        Preserve the library's log-and-return convention on gateway errors.
+        Return True for an acknowledgement, an error/code dict for a gateway
+        rejection, and False for transport or missing-response failures. Public
+        methods expose rejection details only when return_errors=True.
         """
         try:
             response = self.send_teg_message(din, teg_message)
@@ -633,6 +637,7 @@ class TEDAPIv1r:
                 log.error('Battery dispatch rejected: %s (status code %s%s)',
                           status.message, status.code,
                           ', not supported by gateway firmware' if status.code == 12 else '')
+                return {'error': status.message, 'code': status.code}
             elif response.HasField('teg') and response.teg.HasField('dispatch_battery_power_response'):
                 return True
             else:

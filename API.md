@@ -228,7 +228,7 @@ Cloud mode also recovers when Tesla replaces or re-provisions a site: if a site 
 
 ### Timed Battery Dispatch (v1r mode only)
 
-- `dispatch_battery_power(power_watts, duration_seconds)` → dict/None
+- `dispatch_battery_power(power_watts, duration_seconds, return_errors=False)` → dict/None
   Send a local signed battery power setpoint. Positive watts discharge,
   negative watts charge, and zero requests zero battery power. Power must be
   a finite number (not a boolean); duration must be an integer from 1 to 86400
@@ -238,7 +238,7 @@ Cloud mode also recovers when Tesla replaces or re-provisions a site: if a site 
   acknowledged `dispatch_battery_power(-500, 30)`, or `None` on failure or an
   unsupported transport/firmware.
 
-- `resume_battery_operation()` → dict/None
+- `resume_battery_operation(return_errors=False)` → dict/None
   Release a dispatch early. Returns `{"resume_battery_operation": true}` on
   acknowledgement, including when no dispatch is active, or `None` on failure.
 
@@ -247,6 +247,15 @@ They do not write `config.json`, reserve or tariff, or cancel manual backup
 events. Use short durations and renew as needed. An acknowledgement confirms
 acceptance, not measured power; read `power()` to check the effect. The
 gateway applies its operating limits. Gateway rejection status is logged.
+
+Pass `return_errors=True` to either method to receive a gateway rejection as
+`{"error": "power 15000.000000 exceeds discharge limit 10000", "code": 11}`
+instead of `None`. The message and code come directly from the gateway;
+firmware without dispatch support may return code `12`. Error dictionaries
+are not acknowledgements: check for `"error"` before treating a result as
+successful. Transport failures, missing/invalid acknowledgements and unavailable
+connections still return `None`; invalid dispatch arguments still raise
+`ValueError`. Omitting the option keeps the existing failure behavior.
 
 A dispatch overrides the backup reserve and the grid export setting: on a
 Powerwall 2 (Backup Gateway 1, firmware 26.34.0), a discharge with the reserve
