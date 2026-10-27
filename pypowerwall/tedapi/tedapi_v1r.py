@@ -599,7 +599,12 @@ class TEDAPIv1r:
 
     def dispatch_battery_power(self, din: str, power_watts: float,
                                duration_seconds: int, return_errors: bool = False) -> Optional[dict]:
-        """Send a timed setpoint: positive watts discharge, negative charge."""
+        """Send a timed setpoint: positive watts discharge, negative charge.
+
+        Use at your own risk: a dispatch overrides the backup reserve and grid
+        export settings (see Powerwall.dispatch_battery_power). Each accepted
+        dispatch is logged at WARNING.
+        """
         validate_battery_dispatch(power_watts, duration_seconds)
         teg = combined_pb2.TEGMessages()
         command = teg.dispatch_battery_power_request.real_power
@@ -607,6 +612,11 @@ class TEDAPIv1r:
         command.duration_seconds = duration_seconds
         result = self._send_battery_dispatch(din, teg)
         if result is True:
+            action = 'discharge' if power_watts > 0 else 'charge' if power_watts < 0 else 'hold'
+            log.warning(
+                "Battery dispatch accepted: %s %g W for %d s. A dispatch overrides "
+                "the backup reserve and grid export settings - use at your own risk.",
+                action, abs(float(power_watts)), duration_seconds)
             return {'power_watts': float(power_watts), 'duration_seconds': duration_seconds}
         return result if return_errors and isinstance(result, dict) else None
 
