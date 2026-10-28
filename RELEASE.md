@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-* feat(v1r): `dispatch_battery_power()` and `resume_battery_operation()` accept `return_errors=True` to return the gateway's rejection message and numeric status code as `{"error": message, "code": code}`. The default remains `None` on failure. Rejections keep the existing log diagnostic and preserve cached power samples; acknowledgements and transport routing are unchanged.
+* fix(v1r): `dispatch_battery_power()` and `resume_battery_operation()` now always return `{"error": message}` on operational failure, with an additional numeric `"code"` for gateway rejections. **Behavior change:** replaces the previous `None` failure result; callers must check for `"error"` rather than relying on truthiness. Invalid arguments still raise `ValueError`. Failed writes preserve cached power samples and are never retried; successful acknowledgements and dispatch warning logs are unchanged.
 
 ## v0.22.2 - Battery Dispatch: Use at Your Own Risk
 

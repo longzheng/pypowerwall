@@ -598,7 +598,7 @@ class TEDAPIv1r:
         return {"mode": mode, "force": force, "result": result}
 
     def dispatch_battery_power(self, din: str, power_watts: float,
-                               duration_seconds: int, return_errors: bool = False) -> Optional[dict]:
+                               duration_seconds: int) -> dict:
         """Send a timed setpoint: positive watts discharge, negative charge.
 
         Use at your own risk: a dispatch overrides the backup reserve and grid
@@ -618,30 +618,31 @@ class TEDAPIv1r:
                 "the backup reserve and grid export settings - use at your own risk.",
                 action, abs(float(power_watts)), duration_seconds)
             return {'power_watts': float(power_watts), 'duration_seconds': duration_seconds}
-        return result if return_errors and isinstance(result, dict) else None
+        return result
 
-    def resume_battery_operation(self, din: str, return_errors: bool = False) -> Optional[dict]:
+    def resume_battery_operation(self, din: str) -> dict:
         """Release a timed dispatch and resume the configured operating mode."""
         teg = combined_pb2.TEGMessages()
         teg.dispatch_battery_power_request.resume_device_mode.SetInParent()
         result = self._send_battery_dispatch(din, teg)
         if result is True:
             return {'resume_battery_operation': True}
-        return result if return_errors and isinstance(result, dict) else None
+        return result
 
     def _send_battery_dispatch(self, din: str, teg_message) -> Union[bool, dict]:
         """Require the dispatch acknowledgement, including for a resume.
 
         An ack confirms acceptance, not measured battery power. Firmware
         without the command may return common.error_response, code 12.
-        Return True for an acknowledgement, an error/code dict for a gateway
-        rejection, and False for transport or missing-response failures. Public
-        methods expose rejection details only when return_errors=True.
+        Return True for an acknowledgement or an error dict on failure. Only
+        gateway rejections include a numeric status code. An error dict is not
+        an acknowledgement, even though it is truthy.
         """
         try:
             response = self.send_teg_message(din, teg_message)
             if response is None:
                 log.error('Battery dispatch: no v1r response')
+                return {'error': 'Battery dispatch: no v1r response'}
             elif response.HasField('common') and response.common.HasField('error_response'):
                 status = response.common.error_response.status
                 log.error('Battery dispatch rejected: %s (status code %s%s)',
@@ -652,9 +653,10 @@ class TEDAPIv1r:
                 return True
             else:
                 log.error('Battery dispatch: response omitted dispatch_battery_power_response')
+                return {'error': 'Battery dispatch was not acknowledged'}
         except Exception as exc:
             log.error('Battery dispatch failed: %s', exc)
-        return False
+            return {'error': 'Battery dispatch command failed'}
 
     # ── Standard API (Bearer token) ──────────────────────────────────
 

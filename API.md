@@ -254,19 +254,20 @@ Cloud mode also recovers when Tesla replaces or re-provisions a site: if a site 
 > responsibility for the results.** Each accepted dispatch is logged at
 > WARNING.
 
-- `dispatch_battery_power(power_watts, duration_seconds, return_errors=False)` → dict/None
+- `dispatch_battery_power(power_watts, duration_seconds)` → dict
   Send a local signed battery power setpoint. Positive watts discharge,
   negative watts charge, and zero requests zero battery power. Power must be
   a finite number (not a boolean); duration must be an integer from 1 to 86400
   seconds. Invalid inputs raise `ValueError` before I/O. A new command replaces
   the active setpoint and timer. The gateway resumes its configured mode at
   expiry. Returns `{"power_watts": -500.0, "duration_seconds": 30}` for an
-  acknowledged `dispatch_battery_power(-500, 30)`, or `None` on failure or an
-  unsupported transport/firmware.
+  acknowledged `dispatch_battery_power(-500, 30)`, or an error dictionary
+  on failure or an unsupported transport/firmware.
 
-- `resume_battery_operation(return_errors=False)` → dict/None
+- `resume_battery_operation()` → dict
   Release a dispatch early. Returns `{"resume_battery_operation": true}` on
-  acknowledgement, including when no dispatch is active, or `None` on failure.
+  acknowledgement, including when no dispatch is active, or an error dictionary
+  on failure.
 
 Both require a paired v1r RSA key and use TEG request/response fields 37/38.
 They do not write `config.json`, the reserve setting or tariff, or cancel
@@ -275,14 +276,18 @@ settings (see the warning above). Use short durations and renew as needed. An ac
 acceptance, not measured power; read `power()` to check the effect. The
 gateway applies its operating limits. Gateway rejection status is logged.
 
-Pass `return_errors=True` to either method to receive a gateway rejection as
-`{"error": "power 15000.000000 exceeds discharge limit 10000", "code": 11}`
-instead of `None`. The message and code come directly from the gateway;
-firmware without dispatch support may return code `12`. Error dictionaries
-are not acknowledgements: check for `"error"` before treating a result as
-successful. Transport failures, missing/invalid acknowledgements and unavailable
-connections still return `None`; invalid dispatch arguments still raise
-`ValueError`. Omitting the option keeps the existing failure behavior.
+Both methods return `{"error": message}` on failure. Gateway rejections also
+include the numeric status code, for example
+`{"error": "power 15000.000000 exceeds discharge limit 10000", "code": 11}`.
+The message and code come directly from the gateway; firmware without dispatch
+support may return code `12`. Connection failures, transport failures and
+missing/invalid acknowledgements return an error message without a gateway code.
+Invalid dispatch arguments still raise `ValueError` before any I/O.
+
+**Behavior change:** failures returned `None` before this change. Check for
+`"error"` before treating a returned dictionary as an acknowledgement; error
+dictionaries are truthy. A missing acknowledgement does not prove that the
+gateway did not act on the command, so do not automatically retry a write.
 
 On Powerwall 3 (v1r LAN; firmware 26.26.4 and
 26.26.11): discharge beyond the home load is exported (export `battery_ok`),

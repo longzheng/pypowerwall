@@ -170,6 +170,7 @@ These conventions are load-bearing — the proxy and downstream dashboards depen
 
 - **Read methods return `None` on failure** (timeouts, parse errors, missing keys). They do not raise to callers. Callers defend with `self.vitals() or {}`.
 - **Dispatch backends return `{"ERROR": "Unknown API: ..."}`** for unmapped URIs (a dict, not `None`).
+- **Battery dispatch/resume writes return error dictionaries on failure**, with the gateway's numeric `code` when it explicitly rejects a command. Callers check for `error`, not truthiness; invalid arguments still raise `ValueError`.
 - **Configuration errors raise** typed exceptions (`PyPowerwallInvalidConfigurationParameter`; `ValueError` for invalid enum-like arguments).
 - **`authenticate()` raises on failure** — that exception is the signal that drives mode fallback in `connect()`.
 - **Rate limiting**: HTTP 429/503 → 5-minute cooldown; 404 → 10-minute negative cache.

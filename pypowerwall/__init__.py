@@ -1308,8 +1308,7 @@ class Powerwall(object):
         log.error("reconnect_grid is not supported by %s backend", type(self.client).__name__)
         return None
 
-    def dispatch_battery_power(self, power_watts: float, duration_seconds: int,
-                               return_errors: bool = False) -> Optional[dict]:
+    def dispatch_battery_power(self, power_watts: float, duration_seconds: int) -> dict:
         """Set battery power for 1-86400 seconds using a paired v1r RSA key.
 
         USE AT YOUR OWN RISK. A dispatch takes direct control of the battery
@@ -1327,11 +1326,11 @@ class Powerwall(object):
         The gateway resumes its configured mode at expiry, or on
         resume_battery_operation(). Use short durations and renew as needed.
 
-        Returns the requested power and duration only after an acknowledgement,
-        or None on failure/unsupported backend. With return_errors=True, a
-        gateway rejection returns {"error": message, "code": status_code};
-        transport failures still return None. An acknowledgement is not
-        measured power: check power() to observe the result. Support depends
+        Returns the requested power and duration only after an acknowledgement.
+        Failures return {"error": message}; gateway rejections also include the
+        numeric "code". Check for "error" before treating a result as accepted.
+        An acknowledgement is not measured power: check power() to observe
+        the result. Support depends
         on firmware; the gateway applies its own operating limits. It doesn't
         write config.json or tariff, or cancel manual backup events.
         Raises ValueError for non-finite/bool power or a non-integer/out-of-range
@@ -1340,27 +1339,26 @@ class Powerwall(object):
         from pypowerwall.helpers import validate_battery_dispatch
         validate_battery_dispatch(power_watts, duration_seconds)
         if self._no_client():
-            return None
+            return {'error': 'Not connected to Powerwall'}
         if hasattr(self.client, 'dispatch_battery_power'):
-            return self.client.dispatch_battery_power(
-                power_watts, duration_seconds, return_errors=return_errors)
+            return self.client.dispatch_battery_power(power_watts, duration_seconds)
         log.error('dispatch_battery_power requires v1r transport')
-        return None
+        return {'error': 'Battery dispatch requires v1r transport'}
 
-    def resume_battery_operation(self, return_errors: bool = False) -> Optional[dict]:
-        """Release a v1r dispatch early; return an acknowledgement dict or None.
+    def resume_battery_operation(self) -> dict:
+        """Release a v1r dispatch early; return an acknowledgement or error dict.
 
         Resumes the configured operating mode. This also succeeds when no
         dispatch is active, and does not cancel a manual backup event.
-        With return_errors=True, a gateway rejection returns an error/code
-        dictionary, as in dispatch_battery_power(); other failures return None.
+        Failures return {"error": message}; gateway rejections also include the
+        numeric "code", as in dispatch_battery_power().
         """
         if self._no_client():
-            return None
+            return {'error': 'Not connected to Powerwall'}
         if hasattr(self.client, 'resume_battery_operation'):
-            return self.client.resume_battery_operation(return_errors=return_errors)
+            return self.client.resume_battery_operation()
         log.error('resume_battery_operation requires v1r transport')
-        return None
+        return {'error': 'Battery dispatch requires v1r transport'}
 
     def _validate_init_configuration(self):
 

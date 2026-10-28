@@ -927,8 +927,7 @@ class TEDAPI:
             self._v1r_write_transport(), "send_island_mode", self.din, mode=1
         )
 
-    def dispatch_battery_power(self, power_watts: float, duration_seconds: int,
-                               return_errors: bool = False) -> Optional[dict]:
+    def dispatch_battery_power(self, power_watts: float, duration_seconds: int) -> dict:
         """Request a timed battery power setpoint through signed v1r.
 
         Use at your own risk: it overrides the backup reserve and grid export
@@ -936,28 +935,29 @@ class TEDAPI:
         """
         from pypowerwall.helpers import validate_battery_dispatch
         validate_battery_dispatch(power_watts, duration_seconds)
-        return self._battery_dispatch_command(
-            'dispatch_battery_power', power_watts, duration_seconds, return_errors=return_errors)
+        return self._battery_dispatch_command('dispatch_battery_power', power_watts, duration_seconds)
 
-    def resume_battery_operation(self, return_errors: bool = False) -> Optional[dict]:
+    def resume_battery_operation(self) -> dict:
         """Release an active dispatch through signed v1r."""
-        return self._battery_dispatch_command('resume_battery_operation', return_errors=return_errors)
+        return self._battery_dispatch_command('resume_battery_operation')
 
-    def _battery_dispatch_command(self, method: str, *args, return_errors: bool = False) -> Optional[dict]:
+    def _battery_dispatch_command(self, method: str, *args) -> dict:
         """Dispatch through the same strict signed-v1r route as other writes."""
         if not self.v1r:
             log.error('%s requires v1r transport', method)
-            return None
+            return {'error': 'Battery dispatch requires v1r transport'}
         try:
             if not self.din and not self.connect():
                 log.error('Not connected - unable to %s', method)
-                return None
+                return {'error': 'Not connected to Powerwall'}
             transport = self._v1r_write_transport()
             if transport is None:
                 log.error('%s requires an available signed-v1r transport', method)
-                return None
-            result = self._v1r_call(transport, method, self.din, *args, return_errors=return_errors)
-            if isinstance(result, dict) and 'error' not in result:
+                return {'error': 'Battery dispatch requires an available signed-v1r transport'}
+            result = self._v1r_call(transport, method, self.din, *args)
+            if not isinstance(result, dict) or not result:
+                return {'error': 'Battery dispatch was not acknowledged'}
+            if 'error' not in result:
                 # Status/controller (and PW3 vitals, used by vitals() and
                 # get_blocks()) contain battery power. Drop their samples so
                 # the next read can observe the accepted setpoint/release.
@@ -967,7 +967,7 @@ class TEDAPI:
             return result
         except Exception as exc:
             log.error('%s failed: %s', method, exc)
-            return None
+            return {'error': 'Battery dispatch command failed'}
 
     # ── Max Backup (TEGMessages) ─────────────────────────────────────
 
